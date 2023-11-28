@@ -12,6 +12,8 @@ from .gpu_utils import (
     is_cuda_array,
     pin_memory,
     nvtx_mark,
+    change_type,
+    is_torch_tensor,
     get_ptr,
 )
 
@@ -23,6 +25,8 @@ __all__ = [
     "CUPY_AVAILABLE",
     "is_host_array",
     "is_cuda_array",
+    "change_type",
+    "is_torch_tensor",
     "pin_memory",
     "nvtx_mark",
     "get_ptr",

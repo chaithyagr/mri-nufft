@@ -11,6 +11,8 @@ from .utils import (
     is_host_array,
     nvtx_mark,
     pin_memory,
+    change_type,
+    is_torch_tensor,
     sizeof_fmt,
 )
 from ._cupy_kernels import update_density
@@ -289,7 +291,7 @@ class MRICufiNUFFT(FourierOperatorBase):
                 )
                 self.smaps_cached = True
             else:
-                self.smaps = pin_memory(smaps.astype(self.cpx_dtype))
+                self.smaps = pin_memory(change_type(smaps, self.cpx_dtype))
                 self._smap_d = cp.empty(self.shape, dtype=self.cpx_dtype)
 
         self.raw_op = RawCufinufftPlan(
@@ -323,7 +325,7 @@ class MRICufiNUFFT(FourierOperatorBase):
             check_size(data, (self.n_batchs, *self.shape))
         else:
             check_size(data, (self.n_batchs, self.n_coils, *self.shape))
-        data = data.astype(self.cpx_dtype)
+        data = change_type(data, self.cpx_dtype)
 
         # Dispatch to special case.
         if self.uses_sense and is_cuda_array(data):
@@ -858,7 +860,7 @@ def pipe(kspace, grid_shape, num_iter=10, tol=2e-7):
         )
     import cupy as cp
 
-    kspace = proper_trajectory(kspace, normalize="pi").astype(np.float32)
+    kspace = change_type(proper_trajectory(kspace, normalize="pi"), np.float32)
     if is_host_array(kspace):
         kspace = cp.array(kspace, order="F")
     image = cp.empty(grid_shape, dtype=np.complex64)

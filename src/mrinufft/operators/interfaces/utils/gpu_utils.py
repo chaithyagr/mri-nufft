@@ -5,11 +5,25 @@ from hashlib import md5
 from functools import wraps
 
 CUPY_AVAILABLE = True
+TORCH_AVAILABLE = True
 try:
     import cupy as cp
 except ImportError:
     CUPY_AVAILABLE = False
 
+try:
+    import torch
+except ImportError:
+    TORCH_AVAILABLE = False
+
+if TORCH_AVAILABLE:
+    # Dict of NumPy dtype -> torch dtype (when the correspondence exists)
+    numpy_to_torch_dtype_dict = {
+        np.dtype('float32')    : torch.float32,
+        np.dtype('float64')    : torch.float64,
+        np.dtype('complex64')  : torch.complex64,
+        np.dtype('complex128') : torch.complex128
+    }
 
 def get_maxThreadBlock():
     """Get the warp size of the current device."""
@@ -43,6 +57,24 @@ def get_ptr(var):
         return var.data_ptr()
 
 
+def is_torch_tensor(var):
+    """Check if var is a torch tensor."""
+    try:
+        import torch
+        return isinstance(var, torch.Tensor)
+    except Exception:
+        return False
+
+def change_type(var, dtype):
+    """Change the type of var. Also internally checks for torch tensor"""
+    if TORCH_AVAILABLE and is_torch_tensor(var):
+        # FIXME: Find a better way to do this.
+        np_temp_array = np.zeros(1, dtype=dtype)
+        return var.type(numpy_to_torch_dtype_dict[np_temp_array.dtype])
+    else:
+        return var.astype(dtype) 
+    
+ 
 def pin_memory(array):
     """Create a copy of the array in pinned memory."""
     mem = cp.cuda.alloc_pinned_memory(array.nbytes)
