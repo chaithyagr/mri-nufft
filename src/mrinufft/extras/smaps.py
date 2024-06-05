@@ -162,19 +162,19 @@ def low_frequency(
         samples, shape, density=dc, n_coils=k_space.shape[0]
     )
     Smaps = smaps_adj_op.adj_op(k_space)
+    if np.sum(blurr_factor) > 0:
+        if isinstance(blurr_factor, float) or isinstance(blurr_factor, int):
+            blurr_factor = (blurr_factor,) * (Smaps.ndim-1)
+        Smaps = gaussian(np.abs(Smaps), sigma=(0,) + blurr_factor) * np.exp(
+            1j * np.angle(Smaps)
+        )
     SOS = np.linalg.norm(Smaps, axis=0)
+    # Smooth out the sensitivity maps
     if mask:
         thresh = threshold_otsu(SOS)
         # Create convex hull from mask
         convex_hull = convex_hull_image(SOS > thresh)
         Smaps = Smaps * convex_hull
-    # Smooth out the sensitivity maps
-    if np.sum(blurr_factor) > 0:
-        if isinstance(blurr_factor, float) or isinstance(blurr_factor, int):
-            blurr_factor = (blurr_factor,) * SOS.ndim
-        Smaps = gaussian(np.abs(Smaps), sigma=(0,) + blurr_factor) * np.exp(
-            1j * np.angle(Smaps)
-        )
     # Re-normalize the sensitivity maps
     if mask or np.sum(blurr_factor) > 0:
         # ReCalculate SOS with a minor eps to ensure divide by 0 is ok
