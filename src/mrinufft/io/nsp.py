@@ -252,7 +252,7 @@ def write_trajectory(
 def read_trajectory(
     grad_filename: str,
     dwell_time: float = DEFAULT_RASTER_TIME,
-    num_adc_samples: int = None,
+    num_adc_samples: int|str = None,
     gamma: Gammas | float = Gammas.HYDROGEN,
     raster_time: float = DEFAULT_RASTER_TIME,
     read_shots: bool = False,
@@ -306,6 +306,9 @@ def read_trajectory(
                 num_adc_samples = num_samples_per_shot + 1
             else:
                 num_adc_samples = int(num_samples_per_shot * (raster_time / dwell_time))
+        elif num_adc_samples == "min_osf":
+            num_adc_samples = int(min_osf * num_samples_per_shot)
+            dwell_time = raster_time / min_osf
         if version >= 4.1:
             TE, data = _pop_elements(data)
             grad_max, data = _pop_elements(data)
