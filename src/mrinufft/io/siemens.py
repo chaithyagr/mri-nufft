@@ -52,6 +52,8 @@ def read_siemens_rawdat(
     """
     try:
         from mapvbvd import mapVBVD
+        from spec2nii.dcm2niiOrientation.orientationFuncs import dcm_to_nifti_orientation
+        from spec2nii.Siemens.twixfunctions import twix2DCMOrientation
     except ImportError as err:
         raise ImportError(
             "The mapVBVD module is not available. Please install it using "
@@ -68,6 +70,17 @@ def read_siemens_rawdat(
         "n_adc_samples": int(twixObj.image.NCol),
         "n_slices": int(twixObj.image.NSli),
     }
+    # Extract the orientation information and convert to nii compatible
+    orient = twix2DCMOrientation(twixObj["hdr"])
+    imageOrientationPatient, imagePositionPatient, pixelSpacing, slicethickness, dim_swapped = orient
+    orientation = dcm_to_nifti_orientation(
+        imageOrientationPatient,
+        imagePositionPatient,
+        np.append(pixelSpacing, slicethickness),
+        (1, 1, 1),
+        half_shift=True,
+    )
+    hdr["orientation"] = orientation.Q44
     if slice_num is not None and hdr["n_slices"] < slice_num:
         raise ValueError("The slice number is out of bounds.")
     if contrast_num is not None and hdr["n_contrasts"] < contrast_num:

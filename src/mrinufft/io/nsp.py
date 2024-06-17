@@ -446,6 +446,7 @@ def read_arbgrad_rawdat(
         slice_num=slice_num,
         contrast_num=contrast_num,
     )
+    hdr['SequenceString'] = twixObj.hdr['Meas'][('tSequenceString')]
     if "ARBGRAD_VE11C" in data_type:
         hdr["type"] = "ARBGRAD_GRE"
         hdr["shifts"] = ()
