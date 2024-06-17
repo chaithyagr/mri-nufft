@@ -16,7 +16,7 @@ cufinufft = ["cufinufft", "cupy-cuda11x"]
 finufft = ["finufft"]
 pynfft = ["pynfft2", "cython<3.0.0"]
 pynufft = ["pynufft"]
-io = ["pymapvbvd"]
+io = ["pymapvbvd", "spec2nii"]
 smaps = ["scikit-image"]
 autodiff = ["torch"]
 
