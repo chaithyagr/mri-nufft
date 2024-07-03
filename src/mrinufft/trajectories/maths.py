@@ -4,6 +4,7 @@ import numpy as np
 import numpy.linalg as nl
 
 CIRCLE_PACKING_DENSITY = np.pi / (2 * np.sqrt(3))
+EIGENVECTOR_2D_FIBONACCI = (0.4656, 0.6823, 1)
 
 
 ##########
@@ -167,7 +168,7 @@ def Ra(vector, theta):
     """Initialize 3D rotation matrix around an arbitrary vector.
 
     Initialize a 3D rotation matrix to rotate around `vector` by an angle `theta`.
-    It corresponds to the generalized formula, while `Rx`, `Ry` and `Rz` are subcases.
+    It corresponds to a generalized formula with `Rx`, `Ry` and `Rz` as subcases.
 
     Parameters
     ----------
@@ -208,6 +209,55 @@ def Ra(vector, theta):
 #############
 # FIBONACCI #
 #############
+
+
+def is_from_fibonacci_sequence(n):
+    """Check if an integer belongs to the Fibonacci sequence.
+
+    An integer belongs to the Fibonacci sequence if either
+    :math:`5*n²+4` or :math:`5*n²-4` is a perfect square
+    (`Wikipedia <https://en.wikipedia.org/wiki/Fibonacci_sequence#Recognizing_Fibonacci_numbers>`_).
+
+    Parameters
+    ----------
+    n : int
+        Integer to check.
+
+    Returns
+    -------
+    bool
+        Whether or not ``n`` belongs to the Fibonacci sequence.
+    """
+
+    def _is_perfect_square(n):
+        r = int(np.sqrt(n))
+        return r * r == n
+
+    return _is_perfect_square(5 * n**2 + 4) or _is_perfect_square(5 * n**2 - 4)
+
+
+def get_closest_fibonacci_number(x):
+    """Provide the closest Fibonacci number.
+
+    Parameters
+    ----------
+    x : float
+        Value to match.
+
+    Returns
+    -------
+    int
+        Closest number from the Fibonacci sequence.
+    """
+    # Find the power such that x ~= phi ** power
+    phi = (1 + np.sqrt(5)) / 2
+    power = np.ceil(np.log(x) / np.log(phi)) + 1
+
+    # Check closest between the ones below and above n
+    lower_xf = int(np.around(phi ** (power) / np.sqrt(5)))
+    upper_xf = int(np.around(phi ** (power + 1) / np.sqrt(5)))
+    xf = lower_xf if (x - lower_xf) < (upper_xf - x) else upper_xf
+    return xf
 
 
 def generate_fibonacci_lattice(nb_points, epsilon=0.25):
