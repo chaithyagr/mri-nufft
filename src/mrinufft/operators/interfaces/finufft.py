@@ -60,7 +60,7 @@ class RawFinufftPlan:
     def adj_op(self, coeffs_data, grid_data):
         """Type 1 transform. Non Uniform to Uniform."""
         if self.n_trans == 1:
-            grid_data = grid_data.reshape(self.shape)
+            #grid_data = grid_data.reshape(self.shape)
             coeffs_data = coeffs_data.reshape(self.n_samples)
         return self.plans[1].execute(coeffs_data, grid_data)
 
@@ -204,17 +204,17 @@ class MRIfinufft(FourierOperatorCPU):
         volume_shape = np.array([_next235beven(int(osf * i), 1) for i in volume_shape])
         grid_op = MRIfinufft(
             samples=kspace_loc,
-            shape=volume_shape,
-            upsampfac=1,
+            shape=original_shape,
+            upsampfac=osf,
             spreadinterponly=1,
-            spread_kerevalmeth=0,
             **kwargs,
         )
         density_comp = np.ones(kspace_loc.shape[0], dtype=grid_op.cpx_dtype)
+        temp_image = np.zeros(volume_shape, dtype=grid_op.cpx_dtype)[None]
         for _ in range(num_iterations):
             density_comp /= np.abs(
                 grid_op.op(
-                    grid_op.adj_op(density_comp.astype(grid_op.cpx_dtype))
+                    grid_op.adj_op(density_comp.astype(grid_op.cpx_dtype), temp_image)
                 ).squeeze()
             )
         if normalize:

@@ -563,7 +563,7 @@ class FourierOperatorCPU(FourierOperatorBase):
         this performs for every coil \ell:
         ..math:: \mathcal{F}\mathcal{S}_\ell x
         """
-        self.check_shape(image=data, ksp=ksp)
+        #self.check_shape(image=data, ksp=ksp)
         # sense
         data = auto_cast(data, self.cpx_dtype)
 
@@ -621,7 +621,7 @@ class FourierOperatorCPU(FourierOperatorBase):
         -------
         Array in the same memory space of coeffs. (ie on cpu or gpu Memory).
         """
-        self.check_shape(image=img, ksp=coeffs)
+        #self.check_shape(image=img, ksp=coeffs)
         coeffs = auto_cast(coeffs, self.cpx_dtype)
         if self.uses_sense:
             ret = self._adj_op_sense(coeffs, img)
