@@ -346,6 +346,10 @@ def read_trajectory(
                 timestamp, data = _pop_elements(data)
                 timestamp = datetime.fromtimestamp(float(timestamp))
                 left_over -= 1
+            if version >= 5.1
+                cart_accel_header, data = _pop_elements(data)
+                left_over -= 1
+                grappa_af, caipi_delta, nacs = extra_cart_accel_header(cart_accel_header)
             _, data = _pop_elements(data, left_over)
         initial_positions, data = _pop_elements(data, dimension * num_shots)
         initial_positions = np.reshape(initial_positions, (num_shots, dimension))
@@ -421,6 +425,11 @@ def read_trajectory(
             params["TE"] = TE
             if version >= 4.2:
                 params["timestamp"] = timestamp
+            if version >= 5.1:
+                params["cart_accel_header"] = cart_accel_header
+                params["grappa_af"] = grappa_af
+                params["caipi_delta"] = caipi_delta
+                params["nacs"] = nacs
         if normalize_factor is not None:
             Kmax = img_size / 2 / fov
             kspace_loc = kspace_loc / Kmax * normalize_factor
