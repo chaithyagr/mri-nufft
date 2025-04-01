@@ -95,6 +95,115 @@ def _extract_kspace_center(
         # Return k-space locations & density just for consistency
         return data_thresholded, kspace_loc, density
 
+@register_smaps
+@flat_traj
+def inati_iter(
+    traj,
+    shape,
+    kspace_data,
+    backend,
+    threshold: float | tuple[float, ...] = 0.1,
+    density=None,
+    window_fun: str = "ellipse",
+    blurr_factor: int | float | tuple[float, ...] = 0.0,
+    mask: bool = False,
+    niter=5,
+    thresh=1e-3,
+    verbose=False
+):
+    # defer import to later to prevent circular import
+    from mrinufft import get_operator
+    try:
+        from skimage.filters import gaussian
+    except ImportError as err:
+        raise ImportError(
+            "The scikit-image module is not available. Please install "
+            "it along with the [extra] dependencies "
+            "or using `pip install scikit-image`."
+        ) from err
+
+    fourier_op = get_operator(backend)(
+        traj, shape, density=density, n_coils=kspace_data.shape[-2]
+    )
+    im = fourier_op.adj_op(kspace_data)
+    if im.ndim < 3 or im.ndim > 4:
+        raise ValueError("Expected 3D [ncoils, ny, nx] or 4D "
+                         " [ncoils, nz, ny, nx] input.")
+    if im.ndim == 3:
+        # pad to size 1 on z for 2D + coils case
+        images_are_2D = True
+        im = im[:, np.newaxis, :, :]
+    else:
+        images_are_2D = False
+    
+    if np.sum(blurr_factor) > 0:
+        if isinstance(blurr_factor, (float, int)):
+            blurr_factor = (blurr_factor,) * (im.ndim - 1)
+    
+    # convert smoothing kernel to array
+    ncha = im.shape[0]
+
+    D_sum = im.sum(axis=(1, 2, 3))
+
+    v = 1/np.linalg.norm(D_sum)
+    D_sum *= v
+    R = 0
+
+    for cha in range(ncha):
+        R += np.conj(D_sum[cha]) * im[cha, ...]
+
+    eps = np.finfo(im.real.dtype).eps * np.abs(im).mean()
+    for it in range(niter):
+        print(it)
+        if verbose:
+            print("Coil map estimation: iteration %d of %d" % (it+1, niter))
+        if thresh > 0:
+            prevR = R.copy()
+        R = np.conj(R)
+        coil_map = im * R[np.newaxis, ...]
+        coil_map_conv = coil_map
+        D = coil_map_conv * np.conj(coil_map_conv)
+        R = D.sum(axis=0)
+        R = np.sqrt(R) + eps
+        R = 1/R
+        coil_map = coil_map_conv * R[np.newaxis, ...]
+        D = im * np.conj(coil_map)
+        R = D.sum(axis=0)
+        D = coil_map * R[np.newaxis, ...]
+        try:
+            # numpy >= 1.7 required for this notation
+            D_sum = D.sum(axis=(1, 2, 3))
+        except:
+            D_sum = im.reshape(ncha, -1).sum(axis=1)
+        v = 1/np.linalg.norm(D_sum)
+        D_sum *= v
+
+        imT = 0
+        for cha in range(ncha):
+            imT += np.conj(D_sum[cha]) * coil_map[cha, ...]
+        magT = np.abs(imT) + eps
+        imT /= magT
+        R = R * imT
+        imT = np.conj(imT)
+        coil_map = coil_map * imT[np.newaxis, ...]
+
+        if thresh > 0:
+            diffR = R - prevR
+            vRatio = np.linalg.norm(diffR) / np.linalg.norm(R)
+            if verbose:
+                print("vRatio = {}".format(vRatio))
+            if vRatio < thresh:
+                break
+
+ e  coil_combined = (im * np.conj(coil_map)).sum(0)
+
+    if images_are_2D:
+        # remove singleton z dimension that was added for the 2D case
+        coil_combined = coil_combined[0, :, :]
+        coil_map = coil_map[:, 0, :, :]
+
+    return coil_map, coil_combined
+
 
 @register_smaps
 @flat_traj
