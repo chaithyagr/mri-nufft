@@ -11,6 +11,7 @@ def read_siemens_rawdat(
     removeOS: bool = False,
     doAverage: bool = True,
     squeeze: bool = True,
+    reshape: bool = False,
     return_twix: bool = True,
     slice_num: int | None = None,
     contrast_num: int | None = None,
@@ -27,6 +28,9 @@ def read_siemens_rawdat(
         Whether to average the data acquired along NAve dimension.
     squeeze : bool, optional
         Whether to squeeze the dimensions of the data, by default True.
+    reshape : bool, optional
+        Whether to reshape to Num_Shots x Num_samples_per_shot, by default False.
+        This is useful for non-Cartesian imaging only.
     data_type : str, optional
         The type of data to read, by default 'ARBGRAD_VE11C'.
     return_twix : bool, optional
@@ -100,15 +104,15 @@ def read_siemens_rawdat(
     if squeeze:
         raw_kspace = np.squeeze(raw_kspace)
     data = np.moveaxis(raw_kspace, 0, 2)
-
-    data = data.reshape(
-        hdr["n_coils"],
-        hdr["n_shots"],
-        hdr["n_adc_samples"],
-        hdr["n_slices"] if slice_num is None else 1,
-        hdr["n_contrasts"] if contrast_num is None else 1,
-        hdr["n_average"] if hdr["n_average"] > 1 and not doAverage else 1,
-    )
+    if reshape:
+        data = data.reshape(
+            hdr["n_coils"],
+            hdr["n_shots"],
+            hdr["n_adc_samples"],
+            hdr["n_slices"] if slice_num is None else 1,
+            hdr["n_contrasts"] if contrast_num is None else 1,
+            hdr["n_average"] if hdr["n_average"] > 1 and not doAverage else 1,
+        )
     if return_twix:
         return data, hdr, twixObj
     return data, hdr
