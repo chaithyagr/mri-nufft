@@ -268,6 +268,13 @@ def conify(
 
     return new_trajectory
 
+def azetkify(
+    trajectory: NDArray,
+    nb_rotations: int,
+) -> NDArray:
+    """Rotate 2D or 3D trajectories into azimuthal equispaced k-space."""
+    raise NotImplementedError("`azetkify` is not implemented yet.")
+    
 
 def epify(
     trajectory: NDArray,
