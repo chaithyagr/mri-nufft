@@ -269,12 +269,76 @@ def conify(
     return new_trajectory
 
 def azetkify(
-    trajectory: NDArray,
+    base_traj: np.ndarray,
     nb_rotations: int,
-) -> NDArray:
-    """Rotate 2D or 3D trajectories into azimuthal equispaced k-space."""
-    raise NotImplementedError("`azetkify` is not implemented yet.")
+    twist: float = 0.5,
+    shuffle: float = 0.0,
+    speed: int = 1,
+):
+    """
+    Generate a 3D radial trajectory using golden-angle rotations and user-defined rotation logic.
+
+    Parameters
+    ----------
+    base_traj : np.ndarray
+        The base trajectory of shape (Ns, 3), e.g., a line along z.
+    nb_rotations : int
+        Number of desired radial directions (rotations).
+    twist : float, optional
+        Twist factor for elevation angle shaping (default 0.5).
+    shuffle : float, optional
+        Shuffle strength in [0, 1] (default 0).
+    speed : int, optional
+        Speed ordering factor (default 1, meaning no speed ordering).
     
+    Returns
+    -------
+    np.ndarray
+        Full 3D trajectory of shape (Nc, Ns, 3).
+    """
+    # Golden-angle step in radians
+    golden_angle_rad = 2 * np.pi / ((1 + np.sqrt(5)) / 2)
+
+    # Compute rotation angles per axis
+    # Use twist to modulate elevation (x), shuffle for azimuth (z)
+    x_tilt = twist * golden_angle_rad  # spiral out of plane
+    y_tilt = 0.0                       # keep y tilt fixed unless needed
+    z_tilt = golden_angle_rad * (0.5 + shuffle * ((1 / ((1 + np.sqrt(5)) / 2)) - 0.5))
+
+    # Use rotate function to apply Nc rotations
+    traj = rotate(base_traj[None, ...], nb_rotations=nb_rotations, x_tilt=x_tilt, y_tilt=y_tilt, z_tilt=z_tilt)
+
+    # Speed reordering
+    if speed > 1:
+        golden_step = speed * (1 / ((1 + np.sqrt(5)) / 2))
+        order = []
+        selected = np.zeros(speed, dtype=bool)
+        pos = 0
+        for _ in range(speed):
+            pos = (pos + golden_step) % speed
+            idx = int(pos)
+            if selected[idx]:
+                offset = 1
+                while selected[(idx + offset) % speed]:
+                    offset += 1
+                idx = (idx + offset) % speed
+            selected[idx] = True
+            order.append(idx)
+
+        # Reorder trajectory
+        base = nb_rotations // speed
+        extra = nb_rotations % speed
+        reordered = np.zeros_like(traj)
+        for i in range(nb_rotations):
+            group = i % speed
+            slot = i // speed + order[group] * base
+            if order[group] < extra:
+                slot += order[group]
+            else:
+                slot += extra
+            reordered[slot] = traj[i]
+        traj = reordered
+    return traj
 
 def epify(
     trajectory: NDArray,
