@@ -131,7 +131,7 @@ def get_gridded_trajectory(
             np.tile(np.linspace(1, 10, trajectory.shape[1]), (trajectory.shape[0],))
         )
     elif grid_type == "inversion":
-        data = _gridder_adj_op(np.tile(np.linspace(1, 10, trajectory.shape[0]), trajectory.shape[1])) / (gridded_ones + np.finfo(np.float32).eps)
+        data = _gridder_adj_op(np.tile(np.linspace(1, 10, trajectory.shape[0]), trajectory.shape[1]))# / (gridded_ones + np.finfo(np.float32).eps)
     elif grid_type == "holes":
         data = np.abs(gridded_ones).squeeze() < threshold
         if elliptical_samp:
