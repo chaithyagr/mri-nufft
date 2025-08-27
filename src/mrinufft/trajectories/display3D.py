@@ -19,7 +19,6 @@ def get_gridded_trajectory(
     osf: int = 1,
     backend: str = "gpunufft",
     traj_params: dict = None,
-    turbo_factor: int = 176,
     elliptical_samp: bool = True,
     threshold: float = 1e-3,
 ):
@@ -69,10 +68,6 @@ def get_gridded_trajectory(
         The parameters needed include `img_size` (tuple), `FOV` (tuple in `m`),
         and `gamma` (float in kHz/T) of the sequence.
         Generally these values are stored in the header of the trajectory file.
-    turbo_factor : int, optional
-        The turbo factor when sampling is with inversion. Default is 176, which is
-        the default turbo factor for MPRAGE acquisitions at 1mm whole
-        brain acquisitions.
     elliptical_samp : bool, optional
         Whether the k-space corners should be expected to be covered
         or ignored when `grid_type` is "holes", i.e. the trajectory is an ellipsoid
@@ -136,12 +131,7 @@ def get_gridded_trajectory(
             np.tile(np.linspace(1, 10, trajectory.shape[1]), (trajectory.shape[0],))
         )
     elif grid_type == "inversion":
-        data = _gridder_adj_op(
-            np.repeat(
-                np.linspace(1, 10, turbo_factor),
-                samples.shape[0] // turbo_factor + 1,
-            )[: samples.shape[0]],
-        ) / (gridded_ones + np.finfo(np.float32).eps)
+        data = _gridder_adj_op(np.tile(np.linspace(1, 10, trajectory.shape[0]), trajectory.shape[1])) / (gridded_ones + np.finfo(np.float32).eps)
     elif grid_type == "holes":
         data = np.abs(gridded_ones).squeeze() < threshold
         if elliptical_samp:
