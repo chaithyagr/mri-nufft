@@ -168,7 +168,7 @@ def low_frequency(
         window_fun=window_fun,
     )
     smaps_adj_op = get_operator(backend)(
-        samples, shape, density=dc, n_coils=k_space.shape[-2]
+        samples, shape, density=dc, n_coils=k_space.shape[-2], squeeze_dims=True,
     )
     Smaps = smaps_adj_op.adj_op(k_space)
     SOS = np.linalg.norm(Smaps, axis=0)

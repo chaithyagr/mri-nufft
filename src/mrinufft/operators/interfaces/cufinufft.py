@@ -9,6 +9,7 @@ from mrinufft._utils import (
     auto_cast,
     power_method,
 )
+from mrinufft._array_compat import _to_numpy
 
 from .utils import (
     CUPY_AVAILABLE,
@@ -257,7 +258,7 @@ class MRICufiNUFFT(FourierOperatorBase):
             else:
                 if self._smaps is None:
                     self._smaps = pin_memory(
-                        new_smaps.astype(self.cpx_dtype, copy=False)
+                        _to_numpy(new_smaps)[0][0].astype(self.cpx_dtype, copy=False)
                     )
                     self._smap_d = cp.empty(self.shape, dtype=self.cpx_dtype)
                 else:
