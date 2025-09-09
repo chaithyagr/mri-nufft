@@ -117,7 +117,7 @@ class MRIfinufft(FourierOperatorCPU):
         n_batchs=1,
         n_trans=1,
         smaps=None,
-        squeeze_dims=True,
+        squeeze_dims=False,
         **kwargs,
     ):
         samples = proper_trajectory(np.asfortranarray(samples), normalize="pi")
