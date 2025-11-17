@@ -245,13 +245,20 @@ class MRICufiNUFFT(FourierOperatorBase):
     def smaps(self, new_smaps):
         """Update smaps.
 
+        If the number of coils is different, it is updated.
+
         Parameters
         ----------
         new_smaps: C-ordered ndarray or a GPUArray.
-
         """
-        self._check_smaps_shape(new_smaps)
         if new_smaps is not None and hasattr(self, "smaps_cached"):
+            C = new_smaps.shape[0]
+            XYZ = new_smaps.shape[1:]
+            if XYZ != self.shape:
+                raise ValueError("Smaps shape does not match image shape.")
+            if C != self.n_coils:
+                warnings.warn("n_coils updated via smaps.")
+                self.n_coils = C
             if self.smaps_cached or is_cuda_array(new_smaps):
                 self.smaps_cached = True
                 warnings.warn(
@@ -294,11 +301,7 @@ class MRICufiNUFFT(FourierOperatorBase):
         if new_density is None:
             self._density = None
             return
-        xp = get_array_module(new_density)
-        if xp.__name__ == "numpy":
-            self._density = cp.array(new_density)
-        elif xp.__name__ == "cupy":
-            self._density = new_density
+        self._density = cp.array(new_density, copy=False)
 
     @with_numpy_cupy
     @nvtx_mark()
@@ -824,23 +827,26 @@ class MRICufiNUFFT(FourierOperatorBase):
         """
         # Disable coil dimension for faster computation
         n_coils = self.n_coils
+        n_batchs = self.n_batchs
         smaps = self.smaps
         squeeze_dims = self.squeeze_dims
 
         self.smaps = None
         self.n_coils = 1
+        self.n_batchs = 1
         self.squeeze_dims = True
 
         x = 1j * np.random.random(self.shape).astype(self.cpx_dtype, copy=False)
         x += np.random.random(self.shape).astype(self.cpx_dtype, copy=False)
 
         x = cp.asarray(x)
-        lipschitz_cst = power_method(
+        lipschitz_cst, _ = power_method(
             max_iter, self, norm_func=lambda x: cp.linalg.norm(x.flatten()), x=x
         )
 
         # restore coil setup
         self.n_coils = n_coils
+        self.n_batchs = n_batchs
         self.smaps = smaps
         self.squeeze_dims = squeeze_dims
 
@@ -857,7 +863,7 @@ class MRICufiNUFFT(FourierOperatorBase):
         cls,
         kspace_loc,
         volume_shape,
-        num_iterations=10,
+        max_iter=10,
         osf=2,
         normalize=True,
         **kwargs,
@@ -870,7 +876,7 @@ class MRICufiNUFFT(FourierOperatorBase):
             the kspace locations
         volume_shape: np.ndarray
             the volume shape
-        num_iterations: int default 10
+        max_iter: int default 10
             the number of iterations for density estimation
         osf: float or int
             The oversampling factor the volume shape
@@ -891,7 +897,7 @@ class MRICufiNUFFT(FourierOperatorBase):
             **kwargs,
         )
         density_comp = cp.ones(kspace_loc.shape[0], dtype=grid_op.cpx_dtype)
-        for _ in range(num_iterations):
+        for _ in range(max_iter):
             density_comp /= cp.abs(
                 grid_op.op(
                     grid_op.adj_op(density_comp.astype(grid_op.cpx_dtype))

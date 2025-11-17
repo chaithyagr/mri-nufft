@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from functools import partial
-from typing import ClassVar
+from typing import ClassVar, Literal, overload, Any, TYPE_CHECKING
 from collections.abc import Callable
 import numpy as np
 from numpy.typing import NDArray
@@ -19,6 +19,7 @@ import warnings
 from mrinufft._array_compat import (
     with_numpy,
     with_numpy_cupy,
+    get_array_module,
     AUTOGRAD_AVAILABLE,
     CUPY_AVAILABLE,
     is_cuda_array,
@@ -29,10 +30,14 @@ from mrinufft.density import get_density
 from mrinufft.extras import get_smaps
 
 
-if CUPY_AVAILABLE:
-    import cupy as cp
-
-
+if TYPE_CHECKING:
+    from mrinufft.operators.autodiff import MRINufftAutoGrad
+    from mrinufft.operators.stacked import MRIStackedNUFFT, MRIStackedNUFFTGPU
+else:
+    MRINufftAutoGrad = Any  # type: ignore
+    MRIStackedNUFFT = Any  # type: ignore
+    MRIStackedNUFFTGPU = Any  # type: ignore
+    #
 # Mapping between numpy float and complex types.
 DTYPE_R2C = {"float32": "complex64", "float64": "complex128"}
 
@@ -62,8 +67,38 @@ def list_backends(available_only=False):
     ]
 
 
+# fmt: off
+@overload
+def get_operator(backend_name: Literal["stacked"],  wrt_data: bool= False, wrt_traj: bool = False, paired_batch: bool=False) -> partial[MRIStackedNUFFT]: ... # noqa: E501
+@overload
+def get_operator(backend_name: str, wrt_data: Literal[True] = True, wrt_traj: bool = False, paired_batch: bool=...) -> partial[MRINufftAutoGrad]: ... # noqa: E501
+@overload
+def get_operator(backend_name: str, wrt_data: bool = ..., wrt_traj: Literal[True] = True, paired_batch: bool=...) -> partial[MRINufftAutoGrad]: ... # noqa: E501
+@overload
+def get_operator(backend_name: str, wrt_data: Literal[True] = True, wrt_traj: bool = ..., paired_batch: bool=..., *args: Any, **kwargs: Any) -> MRINufftAutoGrad: ... # noqa: E501
+@overload
+def get_operator(backend_name: str, wrt_data: bool = ..., wrt_traj: Literal[True] = ..., paired_batch: bool=..., *args: Any, **kwargs: Any) -> MRINufftAutoGrad: ... # noqa: E501
+@overload
+def get_operator(backend_name: str, wrt_data: Literal[False] = False, wrt_traj: Literal[False] = False, paired_batch: bool=..., *args: Any, **kwargs: Any) -> FourierOperatorBase: ... # noqa: E501
+@overload
+def get_operator(backend_name: str, wrt_data: Literal[False] = False, wrt_traj: Literal[False] = False, paired_batch: bool=...) -> type[FourierOperatorBase]: ... # noqa: E501
+# fmt: on
+
+
 def get_operator(
-    backend_name: str, wrt_data: bool = False, wrt_traj: bool = False, *args, **kwargs
+    backend_name: str,
+    wrt_data: bool = False,
+    wrt_traj: bool = False,
+    paired_batch: bool = False,
+    *args,
+    **kwargs,
+) -> (
+    FourierOperatorBase
+    | type[FourierOperatorBase]
+    | MRIStackedNUFFT
+    | partial[MRIStackedNUFFT]
+    | MRINufftAutoGrad
+    | partial[MRINufftAutoGrad]
 ):
     """Return an MRI Fourier operator interface using the correct backend.
 
@@ -75,6 +110,9 @@ def get_operator(
         if set gradients wrt to data and images will be available.
     wrt_traj: bool, default False
         if set gradients wrt to trajectory will be available.
+    paired_batch: bool, default False
+        if set, the autograd will be done with paired batchs of data and smaps.
+
     *args, **kwargs:
         Arguments to pass to the operator constructor.
 
@@ -110,13 +148,15 @@ def get_operator(
     if args or kwargs:
         operator = operator(*args, **kwargs)
 
-    # if autograd:
     if wrt_data or wrt_traj:
+        if isinstance(operator, partial):
+            raise ValueError("Cannot create autograd of a partial operator.")
         if isinstance(operator, FourierOperatorBase):
-            operator = operator.make_autograd(wrt_data, wrt_traj)
-        else:
-            # instance will be created later
-            operator = partial(operator.with_autograd, wrt_data, wrt_traj)
+            operator = operator.make_autograd(
+                wrt_data=wrt_data, wrt_traj=wrt_traj, paired_batch=paired_batch
+            )
+        else:  # instance will be created later
+            operator = partial(operator.with_autograd, wrt_data, wrt_traj, paired_batch)
 
     return operator
 
@@ -128,14 +168,14 @@ class FourierOperatorBase(ABC):
     to ensure that we have all the functions rightly implemented.
     """
 
-    interfaces: dict[str, tuple] = {}
+    interfaces: dict[str, tuple[bool, type[FourierOperatorBase]]] = {}
     autograd_available = False
     _density_method = None
     _grad_wrt_data = False
     _grad_wrt_traj = False
 
     backend: ClassVar[str]
-    available: ClassVar[bool]
+    available: ClassVar[bool] | Callable[..., bool]
 
     def __init__(self):
         if not self.available:
@@ -146,10 +186,10 @@ class FourierOperatorBase(ABC):
         self._n_batchs = 1
         self.squeeze_dims = False
 
-    def __init_subclass__(cls):
+    def __init_subclass__(cls: type[FourierOperatorBase]):
         """Register the class in the list of available operators."""
         super().__init_subclass__()
-        available = getattr(cls, "available", True)
+        available: Callable[..., bool] | bool = getattr(cls, "available", True)
         if callable(available):
             available = available()
         if backend := getattr(cls, "backend", None):
@@ -288,7 +328,7 @@ class FourierOperatorBase(ABC):
             method = get_smaps(method)
         if not isinstance(method, Callable):
             raise ValueError(f"Unknown smaps method: {method}")
-        smaps, SOS = method(
+        smaps = method(
             self.samples,
             self.shape,
             density=self.density,
@@ -297,7 +337,54 @@ class FourierOperatorBase(ABC):
         )
         self.smaps = smaps.reshape(self.n_coils, *self.shape)
 
-    def make_autograd(self, wrt_data=True, wrt_traj=False):
+    def make_linops(self, *, cupy: bool = False):
+        """Create a Scipy Linear Operator from the NUFFT operator.
+
+        We add a _nufft private attribute with the current operator.
+
+        Parameters
+        ----------
+        cupy: bool, default False
+            If True, create a Cupy Linear Operator
+
+        See Also
+        --------
+        - https://docs.cupy.dev/en/stable/reference/generated/cupyx.scipy.sparse.linalg.LinearOperator.html
+        - https://docs.scipy.org/doc/scipy/reference/generated/scipy.sparse.linalg.LinearOperator.html
+        """
+        if cupy and not CUPY_AVAILABLE:
+            raise ValueError("cupy is not available")
+        elif cupy:
+            from cupyx.scipy.sparse.linalg import LinearOperator
+        else:
+            from scipy.sparse.linalg import LinearOperator
+
+        linop = LinearOperator(
+            shape=(
+                self.n_batchs * self.n_coils * self.n_samples,
+                self.n_batchs
+                * (1 if self.uses_sense else self.n_coils)
+                * np.prod(self.shape),
+            ),
+            matvec=lambda x: self.op(  # type: ignore
+                x.reshape(
+                    self.n_batchs, (1 if self.uses_sense else self.n_coils), *self.shape
+                )
+            ).ravel(),
+            rmatvec=lambda x: self.adj_op(  # type: ignore
+                x.reshape(self.n_batchs, self.n_coils, self.n_samples)
+            ).ravel(),
+            dtype=self.cpx_dtype,
+        )
+        linop._nufft = self  # type: ignore
+
+    def make_autograd(
+        self,
+        *,
+        wrt_data: bool = True,
+        wrt_traj: bool = False,
+        paired_batch: bool = False,
+    ) -> MRINufftAutoGrad:
         """Make a new Operator with autodiff support.
 
         Parameters
@@ -310,6 +397,10 @@ class FourierOperatorBase(ABC):
 
         wrt_traj : bool, optional
             If the gradient with respect to the trajectory is computed, default is false
+
+        paired_batch_size : int, optional
+            If provided, specifies batch size for varying data/smaps pairs.
+            Default is None, which means no batching
 
         Returns
         -------
@@ -328,9 +419,11 @@ class FourierOperatorBase(ABC):
 
         from mrinufft.operators.autodiff import MRINufftAutoGrad
 
-        return MRINufftAutoGrad(self, wrt_data=wrt_data, wrt_traj=wrt_traj)
+        return MRINufftAutoGrad(
+            self, wrt_data=wrt_data, wrt_traj=wrt_traj, paired_batch=paired_batch
+        )
 
-    def compute_density(self, method=None):
+    def compute_density(self, method: Callable[..., NDArray] = None):
         """Compute the density compensation weights and set it.
 
         Parameters
@@ -341,10 +434,9 @@ class FourierOperatorBase(ABC):
             - If a string, the method should be registered in the density registry.
             - If a callable, it should take the samples and the shape as input.
             - If a dict, it should have a key 'name', to determine which method to use.
-            other items will be used as kwargs.
+              other items will be used as kwargs.
             - If an array, it should be of shape (Nsamples,) and will be used as is.
             - If `True`, the method `pipe` is chosen as default estimation method.
-
 
         Notes
         -----
@@ -379,7 +471,7 @@ class FourierOperatorBase(ABC):
             )
         self.density = method(self.samples, self.shape, **kwargs)
 
-    def get_lipschitz_cst(self, max_iter=10, **kwargs):
+    def get_lipschitz_cst(self, max_iter=10) -> np.floating | NDArray[np.floating]:
         """Return the Lipschitz constant of the operator.
 
         Parameters
@@ -400,39 +492,50 @@ class FourierOperatorBase(ABC):
         minified version of the nufft operator. No coil or B0 compensation is used,
         but includes any computed density.
         """
-        if self.n_coils > 1 or self.n_batchs > 1:
-            tmp_op = self.__class__(
-                self.samples, self.shape, density=self.density, n_coils=1, **kwargs
-            )
-        else:
-            tmp_op = self
-        return power_method(max_iter, tmp_op)
+        n_coils = self.n_coils
+        n_batchs = self.n_batchs
+        smaps = self.smaps
+        squeeze_dims = self.squeeze_dims
 
-    def cg(self, kspace_data, compute_loss=False, **kwargs):
-        """Conjugate Gradient method to solve the inverse problem.
+        self.smaps = None
+        self.n_coils = 1
+        self.n_batchs = 1
+        self.squeeze_dims = True
+
+        lipschitz_cst, _ = power_method(max_iter, self)
+
+        # restore coil setup
+        self.n_coils = n_coils
+        self.n_batchs = n_batchs
+        self.smaps = smaps
+        self.squeeze_dims = squeeze_dims
+
+        return lipschitz_cst
+
+    def pinv_solver(self, kspace_data, optim="lsqr", **kwargs):
+        """
+        Solves the linear system Ax = y.
+
+        It uses a least-square optimization solver,
 
         Parameters
         ----------
         kspace_data: NDArray
             The k-space data to reconstruct.
-        computer_loss: bool
-            Whether to compute the loss at each iteration.
-            If True, loss is calculated and returned, otherwise, it's skipped.
+        optim: str, default "lsqr"
+            name of the least-square optimizer to use.
+
         **kwargs:
-            Extra arguments to pass to the conjugate gradient method.
+            Extra arguments to pass to the least-square optimizer.
 
         Returns
         -------
         NDArray
             Reconstructed image
-        NDArray, optional
-            array of loss at each iteration, if compute_loss is True.
         """
-        from ..extras.gradient import cg
+        from ..extras.optim import get_optimizer
 
-        return cg(
-            operator=self, kspace_data=kspace_data, compute_loss=compute_loss, **kwargs
-        )
+        return get_optimizer(optim)(operator=self, kspace_data=kspace_data, **kwargs)
 
     @property
     def uses_sense(self):
@@ -450,16 +553,16 @@ class FourierOperatorBase(ABC):
         return len(self._shape)
 
     @property
-    def shape(self):
+    def shape(self) -> tuple[int, ...]:
         """Shape of the image space of the operator."""
         return self._shape
 
     @shape.setter
     def shape(self, shape):
-        self._shape = tuple(shape)
+        self._shape = tuple(int(i) for i in shape)
 
     @property
-    def n_coils(self):
+    def n_coils(self) -> int:
         """Number of coils for the operator."""
         return self._n_coils
 
@@ -481,32 +584,46 @@ class FourierOperatorBase(ABC):
         self._n_batchs = int(n_batchs)
 
     @property
+    def img_full_shape(self) -> tuple[int, ...]:
+        """Full image shape with batch and coil dimensions."""
+        return (self.n_batchs, (1 if self.uses_sense else self.n_coils)) + self.shape
+
+    @property
+    def ksp_full_shape(self) -> tuple[int, int, int]:
+        """Full kspace shape with batch and coil dimensions."""
+        return (self.n_batchs, self.n_coils, self.n_samples)
+
+    @property
     def smaps(self):
         """Sensitivity maps of the operator."""
         return self._smaps
 
     @smaps.setter
     def smaps(self, new_smaps):
-        self._check_smaps_shape(new_smaps)
+        if new_smaps is None:
+            self._smaps = None
+            return
+
+        if not isinstance(new_smaps, np.ndarray):
+            raise ValueError("Smaps should be an array")
+        C = new_smaps.shape[0]
+        XYZ = new_smaps.shape[1:]
+
+        # working with internal value for efficiency
+        if XYZ != self._shape:
+            raise ValueError("Smaps should match image shape.")
+        if C != self._n_coils:
+            self._n_coils = C
+            warnings.warn("updating number of coils via Smaps.")
         self._smaps = new_smaps
 
-    def _check_smaps_shape(self, smaps):
-        """Check the shape of the sensitivity maps."""
-        if smaps is None:
-            self._smaps = None
-        elif smaps.shape != (self.n_coils, *self.shape):
-            raise ValueError(
-                f"smaps shape is {smaps.shape}, it should be"
-                f"(n_coils, *shape): {(self.n_coils, *self.shape)}"
-            )
-
     @property
-    def density(self):
+    def density(self) -> NDArray[np.floating] | None:
         """Density compensation of the operator."""
         return self._density
 
     @density.setter
-    def density(self, new_density):
+    def density(self, new_density: NDArray | None):
         if new_density is None:
             self._density = None
         elif len(new_density) != self.n_samples:
@@ -529,21 +646,21 @@ class FourierOperatorBase(ABC):
         return np.dtype(DTYPE_R2C[str(self.dtype)])
 
     @property
-    def samples(self):
+    def samples(self) -> NDArray:
         """Return the samples used by the operator."""
         return self._samples
 
     @samples.setter
-    def samples(self, new_samples):
+    def samples(self, new_samples: NDArray[np.floating]):
         self._samples = new_samples
 
     @property
-    def n_samples(self):
+    def n_samples(self) -> int:
         """Return the number of samples used by the operator."""
         return self._samples.shape[0]
 
     @property
-    def norm_factor(self):
+    def norm_factor(self) -> np.floating:
         """Normalization factor of the operator."""
         return np.sqrt(np.prod(self.shape) * (2 ** len(self.shape)))
 
@@ -559,9 +676,20 @@ class FourierOperatorBase(ABC):
         )
 
     @classmethod
-    def with_autograd(cls, wrt_data=True, wrt_traj=False, *args, **kwargs):
+    def with_autograd(
+        cls,
+        wrt_data=True,
+        wrt_traj=False,
+        paired_batch=False,
+        *args,
+        **kwargs,
+    ):
         """Return a Fourier operator with autograd capabilities."""
-        return cls(*args, **kwargs).make_autograd(wrt_data, wrt_traj)
+        return cls(*args, **kwargs).make_autograd(
+            wrt_data=wrt_data,
+            wrt_traj=wrt_traj,
+            paired_batch=paired_batch,
+        )
 
 
 class FourierOperatorCPU(FourierOperatorBase):
@@ -788,7 +916,7 @@ class FourierOperatorCPU(FourierOperatorBase):
             for t, b in enumerate(idx_batch):
                 grad[b] += coil_img[t]
         grad /= self.norm_factor
-        return grad
+        return grad.reshape(B, 1, *XYZ)
 
     def _grad_calibless(self, image_data, obs_data):
         T, B, C = self.n_trans, self.n_batchs, self.n_coils
@@ -811,18 +939,19 @@ class FourierOperatorCPU(FourierOperatorBase):
 
 def power_method(
     max_iter: int,
-    operator: FourierOperatorBase,
+    operator: FourierOperatorBase | Callable,
     norm_func: Callable | None = None,
     x: NDArray | None = None,
-) -> float:
+) -> tuple[np.floating | NDArray, NDArray]:
     """Power method to find the Lipschitz constant of an operator.
 
     Parameters
     ----------
     max_iter: int
         Maximum number of iterations
-    operator: FourierOperatorBase or child class
+    operator: FourierOperatorBase or child class or Callable
         NUFFT Operator of which to estimate the lipchitz constant.
+        If it is Callable, it should implement the AHA operation.
     norm_func: callable, optional
         Function to compute the norm , by default np.linalg.norm.
         Change this if you want custom norm, or for computing on GPU.
@@ -831,24 +960,31 @@ def power_method(
 
     Returns
     -------
-    float
-        The lipschitz constant of the operator.
+    x_new_norm: float or NDArray
+        The maximum eigen value
+    x_new: NDArray
+        The eigen vector associated with maximum eigen value
     """
 
     def AHA(x):
+        if isinstance(operator, Callable):
+            return operator(x)
         return operator.adj_op(operator.op(x))
 
     if norm_func is None:
         norm_func = np.linalg.norm
+    return_as_is = True
     if x is None:
+        return_as_is = False
         x = np.random.random(operator.shape).astype(operator.cpx_dtype)
+    xp = get_array_module(x)
     x_norm = norm_func(x)
     x /= x_norm
     for i in range(max_iter):  # noqa: B007
         x_new = AHA(x)
         x_new_norm = norm_func(x_new)
         x_new /= x_new_norm
-        if abs(x_norm - x_new_norm) < 1e-6:
+        if xp.linalg.norm(x_norm - x_new_norm) < 1e-6:
             break
         x_norm = x_new_norm
         x = x_new
@@ -856,8 +992,11 @@ def power_method(
     if i == max_iter - 1:
         warnings.warn("Lipschitz constant did not converge")
 
+    if return_as_is:
+        return x_new_norm, x_new
+
     if hasattr(x_new_norm, "__cuda_array_interface__"):
         import cupy as cp
 
         x_new_norm = cp.asarray(x_new_norm).get().item()
-    return x_new_norm
+    return x_new_norm, x_new
