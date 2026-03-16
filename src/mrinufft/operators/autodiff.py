@@ -476,7 +476,7 @@ def complex_view_wrapper(method):
         out = method(self, x, **kwargs)
         
         if is_real:
-            return torch.view_as_real(out)
+            return torch.view_as_real(out)[0]
         return out
         
     return wrapper
