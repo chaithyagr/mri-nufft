@@ -29,6 +29,7 @@ jobs:
           opencode run "TASK: Fix the issue: ${{ github.event.issue.title }}.
           
           STRICT WORKFLOW:
+          0. Understand what needs to be done
           1. Create branch: feat/fix-${{ github.event.issue.number }}
           2. Apply code changes.
           3. Stage changes using 'git add'.
