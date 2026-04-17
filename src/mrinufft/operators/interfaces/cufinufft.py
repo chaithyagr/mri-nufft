@@ -46,7 +46,13 @@ DTYPE_R2C = {"float32": "complex64", "float64": "complex128"}
 
 
 class RawCufinufftPlan:
-    """Light wrapper around the guru interface of finufft."""
+    """Light wrapper around the guru interface of finufft.
+
+    Supports a memory-efficient single-plan mode (available in cufinufft >= 2.4.0)
+    where one type 3 plan handles both forward and adjoint operations via the
+    ``isign`` parameter to ``execute()``. When disabled (default), creates
+    separate type 1 and type 2 plans for backward compatibility.
+    """
 
     def __init__(
         self,
@@ -54,6 +60,7 @@ class RawCufinufftPlan:
         shape: tuple[int, ...],
         n_trans: int = 1,
         eps: float = 1e-6,
+        single_plan: bool = False,
         **kwargs,
     ):
         self.shape = shape
@@ -61,13 +68,18 @@ class RawCufinufftPlan:
         self.eps = float(eps)
         self.n_trans = n_trans
         self._dtype = samples.dtype
+        self.single_plan = single_plan
         # the first element is dummy to index type 1 with 1
         # and type 2 with 2.
         self.plans: list[Plan | None] = [None, None, None]
         self.grad_plan = None
-        for i in [1, 2]:
-            self._make_plan(i, **kwargs)
-            self._set_pts(i, samples)
+        if single_plan:
+            self._make_plan(3, **kwargs)
+            self._set_pts(3, samples)
+        else:
+            for i in [1, 2]:
+                self._make_plan(i, **kwargs)
+                self._set_pts(i, samples)
 
     @property
     def dtype(self):
@@ -123,10 +135,14 @@ class RawCufinufftPlan:
 
     def type1(self, coeff_data, grid_data):
         """Type 1 transform. Non Uniform to Uniform."""
+        if self.single_plan:
+            return self.plans[3].execute(coeff_data, grid_data, isign=-1)
         return self.plans[1].execute(coeff_data, grid_data)
 
     def type2(self, grid_data, coeff_data):
         """Type 2 transform. Uniform to non-uniform."""
+        if self.single_plan:
+            return self.plans[3].execute(grid_data, coeff_data, isign=1)
         return self.plans[2].execute(grid_data, coeff_data)
 
     def toggle_grad_traj(self):
@@ -168,9 +184,12 @@ class MRICufiNUFFT(FourierOperatorBase, _ToggleGradPlanMixin):
         If True, will try to remove the singleton dimension for batch and coils.
     n_trans: int, default 1
         Number of transform to perform in parallel by cufinufft.
+    single_plan: bool, default False
+        If True, use a single type 3 plan for both forward and adjoint operations.
+        This is available when cufinufft >= 2.4.0 and can reduce memory usage.
+        Requires ``n_trans=1``.
     kwargs :
         Extra kwargs for the raw cufinufft operator
-
 
     Notes
     -----
@@ -189,6 +208,7 @@ class MRICufiNUFFT(FourierOperatorBase, _ToggleGradPlanMixin):
     backend = "cufinufft"
     available = CUFINUFFT_AVAILABLE and CUPY_AVAILABLE
     autograd_available = True
+    supports_single_plan = True
 
     def __init__(
         self,
@@ -248,10 +268,12 @@ class MRICufiNUFFT(FourierOperatorBase, _ToggleGradPlanMixin):
             raise ValueError(
                 "Smaps should be either a C-ordered np.ndarray, or a GPUArray."
             )
+        self.single_plan = kwargs.pop("single_plan", False)
         self.raw_op = RawCufinufftPlan(
             self._samples,
             tuple(shape),
             n_trans=n_trans,
+            single_plan=self.single_plan,
             **kwargs,
         )
 

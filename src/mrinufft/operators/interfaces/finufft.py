@@ -20,7 +20,13 @@ DTYPE_R2C = {"float32": "complex64", "float64": "complex128"}
 
 
 class RawFinufftPlan:
-    """Light wrapper around the guru interface of finufft."""
+    """Light wrapper around the guru interface of finufft.
+
+    Supports a memory-efficient single-plan mode (available in finufft >= 2.4.0)
+    where one type 3 plan handles both forward and adjoint operations via the
+    ``isign`` parameter to ``execute()``. When disabled (default), creates
+    separate type 1 and type 2 plans for backward compatibility.
+    """
 
     def __init__(
         self,
@@ -28,6 +34,7 @@ class RawFinufftPlan:
         shape,
         n_trans=1,
         eps=1e-6,
+        single_plan=False,
         **kwargs,
     ):
         self.shape = shape
@@ -35,14 +42,20 @@ class RawFinufftPlan:
         self.eps = float(eps)
         self.n_trans = n_trans
         self.n_samples = len(samples)
+        self.single_plan = single_plan
         # the first element is dummy to index type 1 with 1
         # and type 2 with 2.
         self.plans = [None, None, None]
         self.grad_plan = None
 
-        for i in [1, 2]:
-            self._make_plan(i, samples, **kwargs)
-            self._set_pts(i, samples)
+        if single_plan:
+            # Use type 3 plan for both directions (finufft >= 2.2.0)
+            self._make_plan(3, samples, **kwargs)
+            self._set_pts(3, samples)
+        else:
+            for i in [1, 2]:
+                self._make_plan(i, samples, **kwargs)
+                self._set_pts(i, samples)
 
     def _make_plan(self, typ, samples, **kwargs):
         self.plans[typ] = Plan(
@@ -63,6 +76,11 @@ class RawFinufftPlan:
 
     def adj_op(self, coeffs_data, grid_data):
         """Type 1 transform. Non Uniform to Uniform."""
+        if self.single_plan:
+            if self.n_trans == 1:
+                grid_data = grid_data.reshape(self.shape)
+                coeffs_data = coeffs_data.reshape(self.n_samples)
+            return self.plans[3].execute(coeffs_data, grid_data, isign=-1)
         if self.n_trans == 1:
             grid_data = grid_data.reshape(self.shape)
             coeffs_data = coeffs_data.reshape(self.n_samples)
@@ -70,6 +88,11 @@ class RawFinufftPlan:
 
     def op(self, coeffs_data, grid_data):
         """Type 2 transform. Uniform to non-uniform."""
+        if self.single_plan:
+            if self.n_trans == 1:
+                grid_data = grid_data.reshape(self.shape)
+                coeffs_data = coeffs_data.reshape(self.n_samples)
+            return self.plans[3].execute(grid_data, coeffs_data, isign=1)
         if self.n_trans == 1:
             grid_data = grid_data.reshape(self.shape)
             coeffs_data = coeffs_data.reshape(self.n_samples)
@@ -107,11 +130,16 @@ class MRIfinufft(FourierOperatorCPU, _ToggleGradPlanMixin):
     squeeze_dims: bool
         If True, the dimensions of size 1 for the coil
         and batch dimension will be squeezed.
+    single_plan: bool, default False
+        If True, use a single plan for both forward and adjoint operations.
+        This is available when finufft >= 2.2.0 and can reduce memory usage.
+        Requires ``n_trans=1``.
     """
 
     backend = "finufft"
     available = FINUFFT_AVAILABLE
     autograd_available = True
+    supports_single_plan = True
 
     def __init__(
         self,
@@ -123,6 +151,7 @@ class MRIfinufft(FourierOperatorCPU, _ToggleGradPlanMixin):
         n_trans=1,
         smaps=None,
         squeeze_dims=True,
+        single_plan=False,
         **kwargs,
     ):
         samples = _array_to_numpy(proper_trajectory(samples, normalize="pi"))
@@ -131,6 +160,7 @@ class MRIfinufft(FourierOperatorCPU, _ToggleGradPlanMixin):
             samples,
             shape,
             n_trans=n_trans,
+            single_plan=single_plan,
             **kwargs,
         )
         super().__init__(
