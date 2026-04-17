@@ -27,7 +27,7 @@ jobs:
 
         run: |
           opencode run "TASK: Fix the issue: ${{ github.event.issue.title }}.
-          
+          CONTEXT:  ${{ github.event.issue.body }} 
           STRICT WORKFLOW:
           0. Understand what needs to be done
           1. Create branch: feat/fix-${{ github.event.issue.number }}
