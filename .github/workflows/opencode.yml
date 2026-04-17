@@ -1,0 +1,31 @@
+name: OpenCode Auto-Fix
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  opencode-agent:
+    if: github.event.label.name == 'fix-it'
+    runs-on: self-hosted # Crucial: tells GitHub to use your local machine
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # Allow the runner to push changes back
+          persist-credentials: true 
+
+      - name: Run OpenCode Fix
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # We use 'opencode run' to feed the issue body to the agent.
+          # The 'build' agent has the ability to write files and use git.
+          opencode run "Fix this issue: ${{ github.event.issue.title }}. Context: ${{ github.event.issue.body }}. 
+          Create a new branch, commit the fix, and open a pull request." --agent build
+
