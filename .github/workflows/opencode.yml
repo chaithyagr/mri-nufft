@@ -21,6 +21,7 @@ jobs:
           persist-credentials: true 
 
       - name: Run OpenCode Fix
+        timeout-minutes: 60  # Explicitly allow up to 1 hour
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
