@@ -53,6 +53,10 @@ from mrinufft.trajectories.inits.waves import (
     initialize_2D_sinusoide,
     initialize_2D_waves,
 )
+from mrinufft.trajectories.inits.sparkling import (
+    initialize_2D_sparkling,
+    initialize_3D_sparkling,
+)
 
 __all__ = [
     # eccentric
@@ -102,4 +106,7 @@ __all__ = [
     # fmri
     "initialize_3D_turbine",
     "initialize_3D_repi",
+    # sparkling
+    "initialize_2D_sparkling",
+    "initialize_3D_sparkling",
 ]
